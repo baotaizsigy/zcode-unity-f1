@@ -6,44 +6,38 @@ jobs:
   fetch:
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch VRChat VPM listings
+      - name: Fetch VRChat SDK packages
         run: |
           set -euo pipefail
           mkdir -p vpm
           cd vpm
           UA="VRChatCreatorCompanion/2.3.2 (https://vrchat.com; support@vrchat.com)"
-          for name in vrc-official vrc-curated; do
-            if curl -fsSL -A "$UA" --retry 5 --retry-delay 5 -o "$name.json" "https://assets.vrchat.com/sdk/$name.json"; then
-              echo "=== $name packages ==="
-              jq -r '.packages | keys[]' "$name.json" || true
-              echo "=== $name avatars versions (tail) ==="
-              jq -r '.packages["com.vrchat.avatars"].versions | keys[]' "$name.json" 2>/dev/null | sort -uV | tail -15 || true
-            else
-              echo "MISS $name"
-            fi
-          done
-          AV=$(cat vrc-official.json vrc-curated.json 2>/dev/null | jq -r '.packages["com.vrchat.avatars"].versions | keys[]' 2>/dev/null | sort -uV | grep -E '^3\.[0-9]+\.[0-9]+$' | tail -1)
+          curl -fsSL -A "$UA" --retry 5 --retry-delay 5 -o index.json "https://vrchat.github.io/packages/index.json"
+          echo "=== packages ==="
+          jq -r '.packages | keys[]' index.json
+          echo "=== avatars versions (tail) ==="
+          jq -r '.packages["com.vrchat.avatars"].versions | keys[]' index.json | sort -uV | tail -20
+          AV=$(jq -r '.packages["com.vrchat.avatars"].versions | keys[]' index.json | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -uV | tail -1)
           echo "AVATARS=$AV"
           test -n "$AV"
-          SRC=vrc-official.json
-          if jq -e --arg v "$AV" '.packages["com.vrchat.avatars"].versions[$v]' vrc-curated.json >/dev/null 2>&1; then SRC=vrc-curated.json; fi
-          echo "SRC=$SRC"
+          echo "=== avatars meta ==="
+          jq -r --arg v "$AV" '.packages["com.vrchat.avatars"].versions[$v] | {version: .version, unity: .unity, dependencies: .dependencies, url: .url}' index.json
+          DEPS=$(jq -r --arg v "$AV" '.packages["com.vrchat.avatars"].versions[$v].dependencies // {}' index.json)
+          echo "DEPS=$DEPS"
           MAJMIN=$(echo "$AV" | cut -d. -f1,2)
-          BASE=$(jq -r '.packages["com.vrchat.base"].versions | keys[]' "$SRC" | sort -uV | grep -E "^${MAJMIN}\.[0-9]+$" | tail -1 || true)
+          BASE=$(jq -r '.packages["com.vrchat.base"].versions | keys[]' index.json | grep -E "^${MAJMIN}\.[0-9]+$" | sort -uV | tail -1)
           if [ -z "$BASE" ]; then
-            BASE=$(jq -r '.packages["com.vrchat.base"].versions | keys[]' "$SRC" | sort -uV | grep -E '^3\.[0-9]+\.[0-9]+$' | tail -1)
+            BASE=$(jq -r '.packages["com.vrchat.base"].versions | keys[]' index.json | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -uV | tail -1)
           fi
           echo "BASE=$BASE"
           test -n "$BASE"
-          echo "=== avatars deps ($AV) ==="
-          jq -r --arg v "$AV" '.packages["com.vrchat.avatars"].versions[$v].dependencies' "$SRC"
           for spec in "com.vrchat.avatars:$AV" "com.vrchat.base:$BASE"; do
             p=${spec%%:*}
             v=${spec##*:}
-            url=$(jq -r --arg p "$p" --arg v "$v" '.packages[$p].versions[$v].url' "$SRC")
+            url=$(jq -r --arg p "$p" --arg v "$v" '.packages[$p].versions[$v].url' index.json)
             echo "DOWNLOAD $p $v <- $url"
-            curl -fsSL -A "$UA" --retry 5 --retry-delay 5 -o "$p-$v.tgz" "$url"
-            sha256sum "$p-$v.tgz" | tee "$p-$v.sha256"
+            curl -fsSL -A "$UA" --retry 5 --retry-delay 5 -o "$p-$v.zip" "$url"
+            sha256sum "$p-$v.zip" | tee "$p-$v.sha256"
           done
           ls -l
       - name: Release
@@ -52,7 +46,5 @@ jobs:
           tag_name: vpm-sdk
           name: VRChat VPM packages
           files: |
-            vpm/*.tgz
+            vpm/*.zip
             vpm/*.sha256
-            vpm/vrc-official.json
-            vpm/vrc-curated.json
