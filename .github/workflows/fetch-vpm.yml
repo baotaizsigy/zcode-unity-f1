@@ -1,0 +1,36 @@
+name: fetch-vpm
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download VPM packages
+        run: |
+          set -euo pipefail
+          mkdir -p vpm
+          cd vpm
+          for pkg in com.vrchat.base com.vrchat.avatars com.vrchat.core.vpm-resolver; do
+            if ! curl -fsSL --retry 3 --retry-delay 5 -o "$pkg.json" "https://packages.vrchat.com/$pkg"; then
+              echo "SKIP $pkg (not found)"
+              continue
+            fi
+            latest=$(jq -r '."dist-tags".latest' "$pkg.json")
+            echo "=== $pkg latest=$latest ==="
+            jq -r --arg v "$latest" '.versions[$v] | {version: $v, dependencies: .dependencies}' "$pkg.json"
+            url=$(jq -r --arg v "$latest" '.versions[$v].dist.tarball' "$pkg.json")
+            echo "tarball=$url"
+            curl -fsSL --retry 5 --retry-delay 5 -o "$pkg-$latest.tgz" "$url"
+            sha256sum "$pkg-$latest.tgz" | tee "$pkg-$latest.sha256"
+          done
+          ls -l
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: vpm-sdk
+          name: VRChat VPM packages
+          files: |
+            vpm/*.tgz
+            vpm/*.json
+            vpm/*.sha256
