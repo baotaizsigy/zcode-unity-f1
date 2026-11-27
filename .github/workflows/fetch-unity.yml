@@ -1,32 +1,24 @@
-name: fetch-unity-2022-3-22f1
-on:
-  workflow_dispatch:
+name: fetch-unity
+on: workflow_dispatch
 permissions:
   contents: write
 jobs:
   fetch:
     runs-on: ubuntu-latest
     steps:
-      - name: Download Unity 2022.3.22f1 international installer
+      - name: Download
         run: |
           set -euo pipefail
-          URL="https://download.unity3d.com/download_unity/887be4894c44/Windows64EditorInstaller/UnitySetup64-2022.3.22f1.exe"
-          echo "Downloading $URL"
-          curl -L --fail --retry 8 --retry-delay 10 --retry-all-errors -o unity.exe "$URL"
+          curl -L --fail --retry 8 --retry-delay 10 --retry-all-errors -o unity.exe "https://download.unity3d.com/download_unity/887be4894c44/Windows64EditorInstaller/UnitySetup64-2022.3.22f1.exe"
           ls -l unity.exe
           sha256sum unity.exe | tee unity.sha256
           split -b 1800M unity.exe unity.part.
           ls -l unity.part.*
-      - name: Publish release
+      - name: Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: unity-2022.3.22f1-intl
           name: Unity 2022.3.22f1 international installer
-          body: |
-            Official international Windows installer (not c1).
-            Merge parts:
-              Windows: copy /b unity.part.aa+unity.part.ab unity.exe
-            Then verify: FileDescription = Unity 2022.3.22f1 Installer, signer = Unity Technologies.
           files: |
             unity.part.*
             unity.sha256
