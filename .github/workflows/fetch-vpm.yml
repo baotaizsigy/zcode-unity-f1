@@ -6,23 +6,35 @@ jobs:
   fetch:
     runs-on: ubuntu-latest
     steps:
-      - name: Download VPM packages
+      - name: Fetch VRChat official VPM listing
         run: |
           set -euo pipefail
           mkdir -p vpm
           cd vpm
-          for pkg in com.vrchat.base com.vrchat.avatars com.vrchat.core.vpm-resolver; do
-            if ! curl -fsSL --retry 3 --retry-delay 5 -o "$pkg.json" "https://packages.vrchat.com/$pkg"; then
-              echo "SKIP $pkg (not found)"
-              continue
-            fi
-            latest=$(jq -r '."dist-tags".latest' "$pkg.json")
-            echo "=== $pkg latest=$latest ==="
-            jq -r --arg v "$latest" '.versions[$v] | {version: $v, dependencies: .dependencies}' "$pkg.json"
-            url=$(jq -r --arg v "$latest" '.versions[$v].dist.tarball' "$pkg.json")
-            echo "tarball=$url"
-            curl -fsSL --retry 5 --retry-delay 5 -o "$pkg-$latest.tgz" "$url"
-            sha256sum "$pkg-$latest.tgz" | tee "$pkg-$latest.sha256"
+          UA="VRChatCreatorCompanion/2.3.2 (https://vrchat.com; support@vrchat.com)"
+          curl -fsSL -A "$UA" --retry 5 --retry-delay 5 -o vrc-official.json "https://assets.vrchat.com/sdk/vrc-official.json"
+          echo "=== packages ==="
+          jq -r '.packages | keys[]' vrc-official.json
+          echo "=== avatars versions ==="
+          jq -r '.packages["com.vrchat.avatars"].versions | keys[]' vrc-official.json | sort -V | tail -12
+          AV=$(jq -r '.packages["com.vrchat.avatars"].versions | keys[]' vrc-official.json | grep -E '^3\.6\.[0-9]+$' | sort -V | tail -1)
+          echo "AVATARS=$AV"
+          test -n "$AV"
+          MAJMIN=$(echo "$AV" | cut -d. -f1,2)
+          BASE=$(jq -r '.packages["com.vrchat.base"].versions | keys[]' vrc-official.json | grep -E "^${MAJMIN}\.[0-9]+$" | sort -V | tail -1)
+          echo "BASE=$BASE"
+          test -n "$BASE"
+          echo "=== avatars deps ($AV) ==="
+          jq -r --arg v "$AV" '.packages["com.vrchat.avatars"].versions[$v].dependencies' vrc-official.json
+          echo "=== base deps ($BASE) ==="
+          jq -r --arg v "$BASE" '.packages["com.vrchat.base"].versions[$v].dependencies' vrc-official.json
+          for spec in "com.vrchat.avatars:$AV" "com.vrchat.base:$BASE"; do
+            p=${spec%%:*}
+            v=${spec##*:}
+            url=$(jq -r --arg p "$p" --arg v "$v" '.packages[$p].versions[$v].url' vrc-official.json)
+            echo "DOWNLOAD $p $v <- $url"
+            curl -fsSL -A "$UA" --retry 5 --retry-delay 5 -o "$p-$v.tgz" "$url"
+            sha256sum "$p-$v.tgz" | tee "$p-$v.sha256"
           done
           ls -l
       - name: Release
@@ -32,5 +44,5 @@ jobs:
           name: VRChat VPM packages
           files: |
             vpm/*.tgz
-            vpm/*.json
             vpm/*.sha256
+            vpm/vrc-official.json
